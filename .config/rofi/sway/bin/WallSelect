@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+
+# --- Configuración ---
+WALLPAPER_DIR="$HOME/wall-dark"
+ROFI_THEME="$HOME/.config/rofi/sway/themes/WallSelect.rasi"
+# Archivo para guardar la RUTA del último wallpaper (útil para otros scripts o referencia)
+LAST_WALLPAPER_PATH_FILE="$HOME/.cache/last_wallpaper_path"
+# Enlace simbólico que SIEMPRE apunta al wallpaper actual (para swaybg en sway/config)
+CURRENT_WALLPAPER_LINK="$HOME/.config/current_wallpaper_symlink"
+# Plantillas de Hellwal
+HELLWAL_TEMPLATES_DIR="$HOME/.config/hellwal/templates"
+
+# --- Verificación de Dependencias ---
+command -v rofi >/dev/null || { echo "Error: Rofi no está instalado." >&2; exit 1; }
+command -v hellwal >/dev/null || { echo "Error: hellwal no está instalado." >&2; exit 1; }
+command -v swaybg >/dev/null || { echo "Error: swaybg no está instalado." >&2; exit 1; }
+command -v notify-send >/dev/null || { echo "Advertencia: notify-send no está instalado, no habrá notificaciones." >&2; }
+
+# --- Verificación del Directorio de Wallpapers ---
+if [ ! -d "$WALLPAPER_DIR" ]; then
+    notify-send -u critical "Error de Wallpapers" "Directorio $WALLPAPER_DIR no encontrado."
+    rofi -e "Directorio $WALLPAPER_DIR no encontrado."
+    exit 1
+fi
+
+# --- Obtener la Lista de Wallpapers ---
+# Buscamos imágenes y las ordenamos. Agregado .gif y .webp
+wallpapers_found=$(find "$WALLPAPER_DIR" -type f \( \
+    -iname "*.jpg" -o -iname "*.jpeg" -o \
+    -iname "*.png" -o -iname "*.gif" -o -iname "*.webp" \
+    \) | sort)
+
+if [ -z "$wallpapers_found" ]; then
+    notify-send -u critical "Error de Wallpapers" "No se encontraron wallpapers en $WALLPAPER_DIR."
+    rofi -e "No se encontraron wallpapers en $WALLPAPER_DIR."
+    exit 1
+fi
+
+# --- Crear Opciones para Rofi ---
+options=""
+while IFS= read -r file; do
+    filename=$(basename "$file")
+    # Formato para Rofi: "Texto a mostrar\0icono\x1fRutaAlIcono\n"
+    # El icono será el propio wallpaper
+    options+="$filename\x00icon\x1f$file\n"
+done <<< "$wallpapers_found"
+
+# --- Usar Rofi para Seleccionar ---
+# -dmenu: modo de menú dinámico
+# -p: prompt
+# -format 's': devuelve solo el string seleccionado (el nombre del archivo)
+# -theme-str: permite añadir o sobrescribir configuraciones del tema
+selected_filename=$(echo -e "$options" | rofi \
+    -dmenu \
+    -p " Wallpapers" \
+    -theme "$ROFI_THEME" \
+    -theme-str 'element-icon{size: 450px; horizontal-align: 0.5; vertical-align: 0.5;}' \
+    -theme-str 'element-text{horizontal-align: 0.5; vertical-align: 0.5;}' \
+    -format 's') # 's' devuelve solo el texto seleccionado (filename)
+
+# --- Procesar Selección ---
+if [[ -n "$selected_filename" ]]; then
+    wallpaper_path="$WALLPAPER_DIR/$selected_filename"
+
+    if [ ! -f "$wallpaper_path" ]; then
+        notify-send -u critical "Error de Wallpaper" "Archivo seleccionado '$selected_filename' no encontrado en $WALLPAPER_DIR."
+        rofi -e "Archivo seleccionado '$selected_filename' no encontrado."
+        exit 1
+    fi
+
+    notify-send "Wallpaper" "Aplicando $selected_filename..."
+
+    # 1. Guardar la ruta del wallpaper para referencia o scripts futuros
+    echo "$wallpaper_path" > "$LAST_WALLPAPER_PATH_FILE"
+
+    # 2. Crear/actualizar el enlace simbólico para swaybg
+    #    Esto es más robusto para swaybg en la config de sway
+    rm -f "$CURRENT_WALLPAPER_LINK" # Eliminar enlace antiguo si existe
+    ln -s "$wallpaper_path" "$CURRENT_WALLPAPER_LINK"
+
+    # 3. Generar esquema de colores con hellwal
+    #    Asegúrate que HELLWAL_TEMPLATES_DIR existe y tiene tus plantillas
+    if [ -d "$HELLWAL_TEMPLATES_DIR" ]; then
+        hellwal -i "$wallpaper_path" -f "$HELLWAL_TEMPLATES_DIR"
+    else
+        # Si no hay directorio de plantillas, intenta sin -f o muestra error
+        hellwal -i "$wallpaper_path"
+        notify-send -u low "Hellwal" "Directorio de plantillas no encontrado en $HELLWAL_TEMPLATES_DIR. Usando hellwal por defecto."
+    fi
+
+
+    # 4. Establecer el wallpaper con swaybg
+    #    Primero, matar cualquier instancia previa de swaybg
+    pkill swaybg
+    #    Luego, iniciar swaybg con el nuevo wallpaper (usando el enlace simbólico)
+    swaybg -o '*' -i "$CURRENT_WALLPAPER_LINK" -m fill &
+
+    # 5. Reiniciar Waybar para que tome los nuevos colores/estilos
+    #    SIGUSR2 es usualmente para recargar. Si no, usa killall y reinicia.
+    if pkill -SIGUSR2 waybar; then
+        notify-send "Waybar" "Waybar recargada."
+    else
+        notify-send "Waybar" "No se pudo recargar Waybar con SIGUSR2. Intentando reinicio completo..."
+        killall waybar
+        (sleep 0.5 && waybar > /dev/null 2>&1 &) # Reinicia Waybar en segundo plano
+        notify-send "Waybar" "Waybar reiniciada."
+    fi
+    
+    notify-send -i "$wallpaper_path" "Wallpaper Aplicado" "$selected_filename"
+
+else
+    notify-send "Wallpaper" "Selección cancelada."
+    echo "Selección de wallpaper cancelada."
+fi
