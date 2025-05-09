@@ -2,7 +2,7 @@
 @define-color background_rgb #%%foreground%%;     
 @define-color background_alt_rgba #%%color1.hex%%; 
 @define-color foreground #%%foreground%%;       
-@define-color primary #%%color5.hex%%;           
+@define-color primary #%%color12.hex%%;           
 @define-color red #%%color9.hex%%;       
 @define-color green #%%color7.hex%%;    
 @define-color yellow #%%color1.hex%%;     
