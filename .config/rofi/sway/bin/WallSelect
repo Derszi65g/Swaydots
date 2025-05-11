@@ -14,6 +14,7 @@ HELLWAL_TEMPLATES_DIR="$HOME/.config/hellwal/templates"
 command -v rofi >/dev/null || { echo "Error: Rofi no está instalado." >&2; exit 1; }
 command -v hellwal >/dev/null || { echo "Error: hellwal no está instalado." >&2; exit 1; }
 command -v swaybg >/dev/null || { echo "Error: swaybg no está instalado." >&2; exit 1; }
+command -v swaymsg >/dev/null || { echo "Error: swaymsg (parte de Sway) no está instalado o no está en el PATH." >&2; exit 1; }
 command -v notify-send >/dev/null || { echo "Advertencia: notify-send no está instalado, no habrá notificaciones." >&2; }
 
 # --- Verificación del Directorio de Wallpapers ---
@@ -83,27 +84,28 @@ if [[ -n "$selected_filename" ]]; then
     if [ -d "$HELLWAL_TEMPLATES_DIR" ]; then
         hellwal -i "$wallpaper_path" -f "$HELLWAL_TEMPLATES_DIR"
     else
-        # Si no hay directorio de plantillas, intenta sin -f o muestra error
+        # Si no hay directorio de plantillas, intenta sin -f o muestra error/advertencia
         hellwal -i "$wallpaper_path"
         notify-send -u low "Hellwal" "Directorio de plantillas no encontrado en $HELLWAL_TEMPLATES_DIR. Usando hellwal por defecto."
     fi
 
 
     # 4. Establecer el wallpaper con swaybg
-    #    Primero, matar cualquier instancia previa de swaybg
+    #    Primero, matar cualquier instancia previa de swaybg para evitar conflictos
     pkill swaybg
     #    Luego, iniciar swaybg con el nuevo wallpaper (usando el enlace simbólico)
+    #    Esto asegura que el wallpaper se aplique inmediatamente.
+    #    Si swaybg se configura en sway/config para usar el symlink,
+    #    el 'swaymsg reload' también lo actualizaría, pero hacerlo aquí es más directo.
     swaybg -o '*' -i "$CURRENT_WALLPAPER_LINK" -m fill &
 
-    # 5. Reiniciar Waybar para que tome los nuevos colores/estilos
-    #    SIGUSR2 es usualmente para recargar. Si no, usa killall y reinicia.
-    if pkill -SIGUSR2 waybar; then
-        notify-send "Waybar" "Waybar recargada."
+    # 5. Recargar SwayWM para aplicar cambios (esto también recargará Waybar, etc.)
+    if swaymsg reload; then
+        notify-send "Sway" "Configuración de Sway recargada. Waybar y otros componentes deberían actualizarse."
     else
-        notify-send "Waybar" "No se pudo recargar Waybar con SIGUSR2. Intentando reinicio completo..."
-        killall waybar
-        (sleep 0.5 && waybar > /dev/null 2>&1 &) # Reinicia Waybar en segundo plano
-        notify-send "Waybar" "Waybar reiniciada."
+        notify-send -u critical "Sway" "Error al intentar recargar la configuración de Sway."
+        # Considera mostrar un error con Rofi si el reload falla, ya que es importante
+        # rofi -e "Error al recargar Sway. Comprueba los logs."
     fi
     
     notify-send -i "$wallpaper_path" "Wallpaper Aplicado" "$selected_filename"
